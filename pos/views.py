@@ -14,7 +14,7 @@ from .models import Reservation, Bill, BillItem, Payment, Notification
 from .serializers import ReservationSerializer, BillSerializer, PaymentSerializer
 from django.utils import timezone
 from accounts.permissions import IsCashier
-
+from inventory.services import deduct_stock_for_order
 
 class OrderListView(generics.ListAPIView):
     """List all orders for the branch"""
@@ -126,6 +126,10 @@ class SubmitOrderView(APIView):
         # Update order status
         order.status = 'CONFIRMED'
         order.save()
+
+       
+        # This triggers auto stock deduction based on recipes
+        deduct_stock_for_order(order)  
 
         return Response({
             'message': 'Order submitted successfully',
