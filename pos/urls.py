@@ -17,4 +17,7 @@ urlpatterns = [
     # KOT / BOT
     path('kot/', views.KOTListView.as_view(), name='kot-list'),
     path('bot/', views.BOTListView.as_view(), name='bot-list'),
+
+    
 ]
+

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Order, Meal, MealItem, KOT, BOT
+from .models import Order, Meal, MealItem, KOT, BOT, Reservation, Bill, BillItem, Payment
 from menu.serializers import MenuItemSerializer
 
 
@@ -57,4 +57,37 @@ class BOTSerializer(serializers.ModelSerializer):
 
     class Meta:
         model  = BOT
+        fields = '__all__'
+
+class ReservationSerializer(serializers.ModelSerializer):
+    created_by_name = serializers.CharField(
+        source='created_by.get_full_name', read_only=True
+    )
+    table_number = serializers.CharField(
+        source='table.table_number', read_only=True
+    )
+
+    class Meta:
+        model  = Reservation
+        fields = '__all__'
+
+
+class BillItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = BillItem
+        fields = '__all__'
+
+
+class PaymentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model  = Payment
+        fields = '__all__'
+
+
+class BillSerializer(serializers.ModelSerializer):
+    items   = BillItemSerializer(many=True, read_only=True)
+    payment = PaymentSerializer(read_only=True)
+
+    class Meta:
+        model  = Bill
         fields = '__all__'

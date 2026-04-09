@@ -10,6 +10,10 @@ from .serializers import (
 )
 from accounts.permissions import IsWaiter, IsChef, IsManager
 from tables.models import Table
+from .models import Reservation, Bill, BillItem, Payment, Notification
+from .serializers import ReservationSerializer, BillSerializer, PaymentSerializer
+from django.utils import timezone
+from accounts.permissions import IsCashier
 
 
 class OrderListView(generics.ListAPIView):
@@ -206,3 +210,260 @@ class UpdateOrderStatusView(APIView):
                 order.table.save()
 
         return Response(OrderSerializer(order).data)
+
+class ReservationListView(generics.ListCreateAPIView):
+    """List all reservations or create a new one"""
+    serializer_class   = ReservationSerializer
+    permission_classes = [IsWaiter]
+
+    def get_queryset(self):
+        branch = self.request.user.branch
+        date   = self.request.query_params.get('date')
+        qs     = Reservation.objects.filter(branch=branch)
+        if date:
+            qs = qs.filter(reservation_date=date)
+        return qs
+
+    def perform_create(self, serializer):
+        reservation = serializer.save(
+            branch     = self.request.user.branch,
+            created_by = self.request.user
+        )
+        # Mark table as reserved
+        if reservation.table:
+            reservation.table.status = Table.Status.RESERVED
+            reservation.table.save()
+
+        # Send confirmation notification
+        self._send_notification(reservation, 'RESERVATION_CONFIRMED')
+
+    def _send_notification(self, reservation, notif_type):
+        messages = {
+            'RESERVATION_CONFIRMED': (
+                f"Dear {reservation.customer_name}, your reservation at "
+                f"{reservation.reservation_date} {reservation.reservation_time} "
+                f"has been confirmed. Table: {reservation.table}."
+            ),
+            'RESERVATION_CANCELLED': (
+                f"Dear {reservation.customer_name}, your reservation on "
+                f"{reservation.reservation_date} has been cancelled."
+            ),
+        }
+        Notification.objects.create(
+            type      = notif_type,
+            recipient = reservation.customer_phone,
+            message   = messages.get(notif_type, '')
+        )
+
+
+class ReservationDetailView(generics.RetrieveUpdateAPIView):
+    serializer_class   = ReservationSerializer
+    permission_classes = [IsWaiter]
+    queryset           = Reservation.objects.all()
+
+
+class CancelReservationView(APIView):
+    """Cancel a reservation"""
+    permission_classes = [IsWaiter]
+
+    def post(self, request, pk):
+        reservation = get_object_or_404(
+            Reservation, pk=pk, branch=request.user.branch
+        )
+
+        if reservation.status == 'CANCELLED':
+            return Response(
+                {'error': 'Reservation already cancelled'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Cancel reservation
+        reservation.status = 'CANCELLED'
+        reservation.save()
+
+        # Free the table
+        if reservation.table:
+            reservation.table.status = Table.Status.AVAILABLE
+            reservation.table.save()
+
+        # Send cancellation notification
+        Notification.objects.create(
+            type      = 'RESERVATION_CANCELLED',
+            recipient = reservation.customer_phone,
+            message   = (
+                f"Dear {reservation.customer_name}, your reservation on "
+                f"{reservation.reservation_date} has been cancelled."
+            )
+        )
+
+        return Response({
+            'message': 'Reservation cancelled successfully',
+            'reservation': ReservationSerializer(reservation).data
+        })
+
+
+class CheckInReservationView(APIView):
+    """Check in a customer for their reservation"""
+    permission_classes = [IsWaiter]
+
+    def post(self, request, pk):
+        reservation = get_object_or_404(
+            Reservation, pk=pk, branch=request.user.branch
+        )
+
+        if reservation.status != 'CONFIRMED':
+            return Response(
+                {'error': 'Reservation is not in confirmed state'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        reservation.status = 'CHECKED_IN'
+        reservation.save()
+
+        # Mark table as occupied
+        if reservation.table:
+            reservation.table.status = Table.Status.OCCUPIED
+            reservation.table.save()
+
+        return Response({
+            'message': f'{reservation.customer_name} checked in successfully',
+            'reservation': ReservationSerializer(reservation).data
+        })
+
+
+class AvailableTablesForReservationView(APIView):
+    """Find available tables for a given date, time, and guest count"""
+    permission_classes = [IsWaiter]
+
+    def get(self, request):
+        date        = request.query_params.get('date')
+        time        = request.query_params.get('time')
+        guest_count = int(request.query_params.get('guest_count', 1))
+        branch      = request.user.branch
+
+        if not date or not time:
+            return Response(
+                {'error': 'date and time are required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Get tables already reserved at this date/time
+        reserved_table_ids = Reservation.objects.filter(
+            branch           = branch,
+            reservation_date = date,
+            reservation_time = time,
+            status__in       = ['CONFIRMED', 'CHECKED_IN']
+        ).values_list('table_id', flat=True)
+
+        # Find available tables with enough capacity
+        available_tables = Table.objects.filter(
+            branch   = branch,
+            capacity__gte = guest_count
+        ).exclude(id__in=reserved_table_ids)
+
+        from tables.serializers import TableSerializer
+        return Response(TableSerializer(available_tables, many=True).data)
+
+
+# ─── BILLING VIEWS ────────────────────────────────────────────────
+
+class GenerateBillView(APIView):
+    """Generate a bill for a completed order"""
+    permission_classes = [IsCashier]
+
+    def post(self, request, order_id):
+        order = get_object_or_404(Order, id=order_id, branch=request.user.branch)
+
+        # Check if bill already exists
+        if hasattr(order, 'bill'):
+            return Response(
+                {'error': 'Bill already generated', 'bill': BillSerializer(order.bill).data},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Create bill
+        bill = Bill.objects.create(order=order, branch=request.user.branch)
+
+        # Create bill items from all meal items
+        for meal in order.meals.all():
+            for item in meal.items.all():
+                BillItem.objects.create(
+                    bill       = bill,
+                    meal_item  = item,
+                    name       = item.menu_item.name,
+                    quantity   = item.quantity,
+                    unit_price = item.unit_price,
+                    subtotal   = item.subtotal
+                )
+
+        # Calculate totals
+        bill.calculate()
+
+        return Response(BillSerializer(bill).data, status=status.HTTP_201_CREATED)
+
+
+class BillDetailView(generics.RetrieveAPIView):
+    """Get bill details"""
+    serializer_class   = BillSerializer
+    permission_classes = [IsCashier]
+    queryset           = Bill.objects.all()
+
+
+class ProcessPaymentView(APIView):
+    """Process payment for a bill"""
+    permission_classes = [IsCashier]
+
+    def post(self, request, bill_id):
+        bill        = get_object_or_404(Bill, id=bill_id)
+        method      = request.data.get('method')
+        amount_paid = float(request.data.get('amount_paid', 0))
+        reference   = request.data.get('reference_code', '')
+
+        if bill.status == 'PAID':
+            return Response(
+                {'error': 'Bill already paid'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if amount_paid < float(bill.total):
+            return Response(
+                {'error': f'Insufficient amount. Total is {bill.total}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if method not in Payment.Method.values:
+            return Response(
+                {'error': 'Invalid payment method'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Create payment record
+        change = amount_paid - float(bill.total)
+        payment = Payment.objects.create(
+            bill           = bill,
+            method         = method,
+            amount_paid    = amount_paid,
+            change_given   = change,
+            reference_code = reference,
+            processed_by   = request.user
+        )
+
+        # Mark bill as paid
+        bill.status = 'PAID'
+        bill.save()
+
+        # Mark order as completed & free table
+        order = bill.order
+        order.status = 'COMPLETED'
+        order.save()
+
+        if order.table:
+            order.table.status = Table.Status.CLEANING
+            order.table.save()
+
+        return Response({
+            'message':  'Payment processed successfully',
+            'change':   change,
+            'bill':     BillSerializer(bill).data,
+            'payment':  PaymentSerializer(payment).data
+        })
