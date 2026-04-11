@@ -58,3 +58,10 @@ class BranchListView(generics.ListCreateAPIView):
     serializer_class = BranchSerializer
     permission_classes = [IsAdmin]
     queryset = Branch.objects.all()
+
+class MeView(APIView):
+    """Get currently logged in user info"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(UserSerializer(request.user).data)
