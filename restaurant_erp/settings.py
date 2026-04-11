@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 
 from pathlib import Path
 from decouple import config
+from celery.schedules import crontab
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -162,3 +163,39 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+
+
+# Celery settings
+CELERY_BROKER_URL         = 'redis://localhost:6379/0'
+CELERY_RESULT_BACKEND     = 'redis://localhost:6379/0'
+CELERY_ACCEPT_CONTENT     = ['json']
+CELERY_TASK_SERIALIZER    = 'json'
+CELERY_RESULT_SERIALIZER  = 'json'
+CELERY_TIMEZONE           = 'Africa/Addis_Ababa'
+
+# Celery Beat Schedule (periodic tasks)
+
+
+CELERY_BEAT_SCHEDULE = {
+    # Check low stock every day at 8am
+    'check-low-stock-daily': {
+        'task':     'notifications.tasks.check_low_stock_all_branches',
+        'schedule': crontab(hour=8, minute=0),
+    },
+    # Check reservation reminders every 15 minutes
+    'reservation-reminders': {
+        'task':     'notifications.tasks.send_reservation_reminders',
+        'schedule': crontab(minute='*/15'),
+    },
+    # Check maintenance due every day at 9am
+    'check-maintenance-daily': {
+        'task':     'notifications.tasks.check_maintenance_due',
+        'schedule': crontab(hour=9, minute=0),
+    },
+    # Apply depreciation on 1st of every month at midnight
+    'monthly-depreciation': {
+        'task':     'notifications.tasks.apply_monthly_depreciation_all',
+        'schedule': crontab(day_of_month=1, hour=0, minute=0),
+    },
+}

@@ -48,12 +48,15 @@ def deduct_stock_for_order(order):
 
 def send_low_stock_alert(ingredient):
     """Send alert to manager when stock is low"""
-    # We'll connect this to notifications module later
-    print(f"⚠️ LOW STOCK ALERT: {ingredient.name} - {ingredient.current_stock} {ingredient.unit} remaining")
+    from notifications.services import send_low_stock_alert as notify
+    notify(ingredient)
 
 
 def log_expired_ingredient(ingredient, user):
     """Log expired ingredient as wastage"""
+    from notifications.services import send_expired_alert as notify
+    notify(ingredient)
+
     WastageLog.objects.create(
         branch     = ingredient.branch,
         ingredient = ingredient,
