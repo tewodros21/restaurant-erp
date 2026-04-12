@@ -42,43 +42,37 @@ def clock_out(employee):
 
 
 def generate_payroll(employee, month, year):
-    """
-    Auto-calculate payroll for an employee for a given month/year.
-    """
     try:
         profile = employee.profile
     except Exception:
         return None, "Employee profile not found"
 
-    # Get all attendance for the month
     attendance_records = AttendanceRecord.objects.filter(
-        employee = employee,
+        employee    = employee,
         date__month = month,
         date__year  = year
     )
 
-    # Calculate total overtime hours
     total_overtime = sum(r.overtime_hours for r in attendance_records)
 
-    # Calculate deductions (absent days)
     absent_days = attendance_records.filter(status='ABSENT').count()
-    daily_rate  = profile.base_salary / 30
+
+    #Fix — ensure base_salary is Decimal
+    base_salary = Decimal(str(profile.base_salary))
+    daily_rate  = base_salary / Decimal('30')
     deductions  = Decimal(str(absent_days)) * daily_rate
 
-    # Calculate overtime pay
-    hourly_rate  = profile.base_salary / (30 * 8)  # monthly / (days * hours)
-    overtime_pay = Decimal(str(total_overtime)) * hourly_rate * profile.overtime_rate
+    hourly_rate  = base_salary / Decimal('240')  # 30 days * 8 hours
+    overtime_pay = Decimal(str(total_overtime)) * hourly_rate * Decimal(str(profile.overtime_rate))
 
-    # Calculate net salary
-    net_salary = profile.base_salary + overtime_pay - deductions
+    net_salary = base_salary + overtime_pay - deductions
 
-    # Create or update payroll record
     payroll, created = PayrollRecord.objects.update_or_create(
         employee = employee,
         month    = month,
         year     = year,
         defaults = {
-            'base_salary':    profile.base_salary,
+            'base_salary':    base_salary,
             'overtime_hours': Decimal(str(total_overtime)),
             'overtime_pay':   overtime_pay,
             'deductions':     deductions,

@@ -2,7 +2,7 @@ from django.db import models
 from accounts.models import User, Branch
 from tables.models import Table, TableSeat
 from menu.models import MenuItem
-
+from decimal import Decimal
 
 class Order(models.Model):
     class Status(models.TextChoices):
@@ -32,9 +32,11 @@ class Order(models.Model):
     def __str__(self):
         return f"Order #{self.id} - Table {self.table} ({self.status})"
 
+    
+
     @property
-    def total_price(self):
-        return sum(item.subtotal for meal in self.meals.all() for item in meal.items.all())
+    def subtotal(self):
+        return Decimal(str(self.unit_price)) * self.quantity
 
 
 class Meal(models.Model):
@@ -60,24 +62,25 @@ class MealItem(models.Model):
         FOOD  = 'FOOD',  'Food'
         DRINK = 'DRINK', 'Drink'
 
-    meal        = models.ForeignKey(Meal, on_delete=models.CASCADE, related_name='items')
-    menu_item   = models.ForeignKey(MenuItem, on_delete=models.CASCADE)
-    quantity    = models.PositiveIntegerField(default=1)
-    unit_price  = models.DecimalField(max_digits=10, decimal_places=2)
-    item_type   = models.CharField(max_length=10, choices=ItemType.choices, default=ItemType.FOOD)
-    status      = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
-    notes       = models.TextField(blank=True)  # e.g. "no onions"
-    created_at  = models.DateTimeField(auto_now_add=True)
+    meal       = models.ForeignKey(Meal, on_delete=models.CASCADE, related_name='items')
+    menu_item  = models.ForeignKey(MenuItem, on_delete=models.CASCADE)
+    quantity   = models.PositiveIntegerField(default=1)
+    unit_price = models.DecimalField(max_digits=10, decimal_places=2)
+    item_type  = models.CharField(max_length=10, choices=ItemType.choices, default=ItemType.FOOD)
+    status     = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    notes      = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
 
     def save(self, *args, **kwargs):
-        # Auto-set unit price from menu item on creation
+        # Always ensure unit_price is Decimal
         if not self.unit_price:
-            self.unit_price = self.menu_item.price
+            self.unit_price = Decimal(str(self.menu_item.price))
         super().save(*args, **kwargs)
 
     @property
     def subtotal(self):
-        return self.unit_price * self.quantity
+        # Force both sides to correct types
+        return Decimal(str(self.unit_price)) * int(self.quantity)
 
     def __str__(self):
         return f"{self.quantity}x {self.menu_item.name} ({self.status})"

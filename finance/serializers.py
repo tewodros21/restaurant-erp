@@ -10,11 +10,16 @@ class ExpenseCategorySerializer(serializers.ModelSerializer):
 
 class ExpenseSerializer(serializers.ModelSerializer):
     category_name   = serializers.CharField(source='category.name', read_only=True)
-    created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
+    created_by_name = serializers.CharField(
+        source='created_by.get_full_name',
+        read_only=True
+    )
 
     class Meta:
         model  = Expense
         fields = '__all__'
+        # Make auto-set fields optional
+        read_only_fields = ['branch', 'created_by', 'approved_by']
 
 
 class DailyReportSerializer(serializers.ModelSerializer):

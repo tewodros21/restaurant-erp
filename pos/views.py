@@ -31,16 +31,24 @@ class OrderListView(generics.ListAPIView):
 
 
 class CreateOrderView(generics.CreateAPIView):
-    """Waiter creates a new order for a table"""
     serializer_class   = CreateOrderSerializer
     permission_classes = [IsWaiter]
 
-    def perform_create(self, serializer):
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
         order = serializer.save()
+
         # Mark table as occupied
         if order.table:
             order.table.status = Table.Status.OCCUPIED
             order.table.save()
+
+        # ✅ Return full OrderSerializer instead of CreateOrderSerializer
+        return Response(
+            OrderSerializer(order, context={'request': request}).data,
+            status=status.HTTP_201_CREATED
+        )
 
 
 class OrderDetailView(generics.RetrieveUpdateAPIView):
