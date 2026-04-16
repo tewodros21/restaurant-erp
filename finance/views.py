@@ -143,10 +143,21 @@ class DashboardView(APIView):
 
     def get(self, request):
         branch = request.user.branch
+        if not branch:
+            return Response(
+                {'error': 'User has no assigned branch. Please contact an admin.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
         today  = timezone.now().date()
 
         # Generate today's report
         report = generate_daily_report(branch, today)
+        if not report:
+            return Response(
+                {'error': 'Failed to generate summary for this branch.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         # Get pending expenses
         pending_expenses = Expense.objects.filter(

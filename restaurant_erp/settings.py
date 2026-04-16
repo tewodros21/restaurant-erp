@@ -3,6 +3,7 @@ from pathlib import Path
 from datetime import timedelta
 from celery.schedules import crontab
 
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # ─── Core ─────────────────────────────────────────────────
@@ -112,11 +113,20 @@ SIMPLE_JWT = {
     'AUTH_HEADER_TYPES':      ('Bearer',),
 }
 
-# ─── CORS ─────────────────────────────────────────────────
-CORS_ALLOWED_ORIGINS = config(
-    'CORS_ALLOWED_ORIGINS',
-    default='http://localhost:3000'
-).split(',')
+# # ─── CORS ─────────────────────────────────────────────────
+# CORS_ALLOWED_ORIGINS = config(
+#     'CORS_ALLOWED_ORIGINS',
+#     default='http://localhost:3000'
+# ).split(',')
+# CORS_ALLOW_CREDENTIALS = True
+
+# Allow your React dev server's origin
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+
+# If you are sending cookies/authentication headers (like tokens in cookies)
 CORS_ALLOW_CREDENTIALS = True
 
 # ─── Static & Media ───────────────────────────────────────
@@ -170,7 +180,7 @@ CELERY_BEAT_SCHEDULE = {
 }
 
 # ─── Logging ──────────────────────────────────────────────
-import os
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,

@@ -8,6 +8,9 @@ from hr.models import PayrollRecord
 
 def generate_daily_report(branch, date=None):
     """Generate daily financial summary for a branch"""
+    if not branch:
+        return None
+
     if not date:
         date = timezone.now().date()
 

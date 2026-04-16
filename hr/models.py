@@ -31,6 +31,9 @@ class EmployeeProfile(models.Model):
     is_active       = models.BooleanField(default=True)
     notes           = models.TextField(blank=True)
 
+    class Meta:
+        ordering = ['user__last_name', 'user__first_name']
+
     def __str__(self):
         return f"{self.user.get_full_name()} - {self.contract_type}"
 
@@ -92,6 +95,9 @@ class LeaveRequest(models.Model):
     status      = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     approved_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='approved_leaves')
     created_at  = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
 
     @property
     def total_days(self):
