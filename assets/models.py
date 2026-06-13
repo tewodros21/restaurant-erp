@@ -1,5 +1,6 @@
 from django.db import models
 from accounts.models import Branch, User
+from decimal import Decimal
 import qrcode
 from io import BytesIO
 from django.core.files import File
@@ -63,13 +64,24 @@ class Asset(models.Model):
 
     @property
     def annual_depreciation(self):
-        if self.depreciation_method == 'STRAIGHT_LINE':
-            return (self.purchase_price - self.salvage_value) / self.useful_life_years
-        return 0
+        if not self.useful_life_years or self.useful_life_years <= 0:
+            return Decimal('0.00')
+
+        if self.depreciation_method == self.DepreciationMethod.DECLINING_BALANCE:
+            # Double-declining-balance: rate applied to the current book value.
+            # The book value shrinks each period, so this returns less over
+            # time; the salvage floor is enforced in the depreciation service.
+            rate = Decimal('2') / Decimal(self.useful_life_years)
+            return Decimal(self.current_value) * rate
+
+        # Straight line
+        return (
+            Decimal(self.purchase_price) - Decimal(self.salvage_value)
+        ) / Decimal(self.useful_life_years)
 
     @property
     def monthly_depreciation(self):
-        return round(self.annual_depreciation / 12, 2)
+        return (self.annual_depreciation / Decimal('12')).quantize(Decimal('0.01'))
 
     def generate_qr(self):
         """Generate and save QR code for this asset"""

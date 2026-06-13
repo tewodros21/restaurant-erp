@@ -12,7 +12,7 @@ from .serializers import (
     DepreciationRecordSerializer,
     MaintenanceScheduleSerializer, MaintenanceLogSerializer
 )
-from .services import apply_depreciation_all_assets, get_upcoming_maintenance
+from .services import apply_depreciation_all_assets, get_upcoming_maintenance, record_maintenance
 from accounts.permissions import IsManager
 from accounts.mixins import BranchScopedQuerysetMixin
 
@@ -126,7 +126,8 @@ class MaintenanceLogListView(generics.ListCreateAPIView):
         ).select_related('asset', 'performed_by').order_by('-performed_at')
 
     def perform_create(self, serializer):
-        serializer.save(performed_by=self.request.user)
+        log = serializer.save(performed_by=self.request.user)
+        record_maintenance(log)
 
 
 class MaintenanceLogDetailView(BranchScopedQuerysetMixin, generics.RetrieveUpdateAPIView):

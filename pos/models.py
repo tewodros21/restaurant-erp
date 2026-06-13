@@ -78,7 +78,10 @@ class MealItem(models.Model):
         DRINK = 'DRINK', 'Drink'
 
     meal       = models.ForeignKey(Meal, on_delete=models.CASCADE, related_name='items')
-    menu_item  = models.ForeignKey(MenuItem, on_delete=models.CASCADE)
+    # PROTECT: deleting a menu item must not silently destroy historical order
+    # lines (and the bills derived from them). Callers should deactivate
+    # (is_available=False) instead of deleting items that have been ordered.
+    menu_item  = models.ForeignKey(MenuItem, on_delete=models.PROTECT)
     quantity   = models.PositiveIntegerField(default=1)
     unit_price = models.DecimalField(max_digits=10, decimal_places=2)
     item_type  = models.CharField(max_length=10, choices=ItemType.choices, default=ItemType.FOOD)

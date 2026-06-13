@@ -2,6 +2,7 @@ from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.shortcuts import get_object_or_404
+from django.db.models import ProtectedError
 from .models import Menu, MenuSection, MenuItem
 from .serializers import MenuSerializer, MenuSectionSerializer, MenuItemSerializer
 from accounts.permissions import IsManager, IsWaiter
@@ -38,6 +39,18 @@ class MenuSectionDetailView(BranchScopedQuerysetMixin, generics.RetrieveUpdateDe
     queryset = MenuSection.objects.all()
     branch_lookup = 'menu__branch'
 
+    def destroy(self, request, *args, **kwargs):
+        # Deleting a section cascades to its items; if any item has order
+        # history it is PROTECT-ed, so surface a clean 409 instead of a 500.
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except ProtectedError:
+            return Response(
+                {'error': 'This section has items with order history and cannot be '
+                          'deleted. Mark those items unavailable instead.'},
+                status=status.HTTP_409_CONFLICT
+            )
+
 
 class MenuItemListView(generics.ListCreateAPIView):
     serializer_class = MenuItemSerializer
@@ -54,6 +67,16 @@ class MenuItemDetailView(BranchScopedQuerysetMixin, generics.RetrieveUpdateDestr
     permission_classes = [IsManager]
     queryset = MenuItem.objects.all()
     branch_lookup = 'section__menu__branch'
+
+    def destroy(self, request, *args, **kwargs):
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except ProtectedError:
+            return Response(
+                {'error': 'This item has order history and cannot be deleted. '
+                          'Mark it unavailable instead.'},
+                status=status.HTTP_409_CONFLICT
+            )
 
 
 class PublicMenuView(generics.RetrieveAPIView):
