@@ -14,6 +14,7 @@ from .serializers import (
 )
 from .services import apply_depreciation_all_assets, get_upcoming_maintenance
 from accounts.permissions import IsManager
+from accounts.mixins import BranchScopedQuerysetMixin
 
 
 class AssetCategoryListView(generics.ListCreateAPIView):
@@ -27,7 +28,9 @@ class AssetListView(generics.ListCreateAPIView):
     permission_classes = [IsManager]
 
     def get_queryset(self):
-        qs       = Asset.objects.filter(branch=self.request.user.branch)
+        qs       = Asset.objects.filter(
+            branch=self.request.user.branch
+        ).select_related('category', 'assigned_to')
         status_f = self.request.query_params.get('status')
         category = self.request.query_params.get('category')
         if status_f:
@@ -83,7 +86,7 @@ class DepreciationRecordListView(generics.ListAPIView):
     def get_queryset(self):
         return DepreciationRecord.objects.filter(
             asset__branch=self.request.user.branch
-        ).order_by('-year', '-month')
+        ).select_related('asset').order_by('-year', '-month')
 
 
 class MaintenanceScheduleListView(generics.ListCreateAPIView):
@@ -93,13 +96,14 @@ class MaintenanceScheduleListView(generics.ListCreateAPIView):
     def get_queryset(self):
         return MaintenanceSchedule.objects.filter(
             asset__branch=self.request.user.branch
-        )
+        ).select_related('asset', 'assigned_to')
 
 
-class MaintenanceScheduleDetailView(generics.RetrieveUpdateDestroyAPIView):
+class MaintenanceScheduleDetailView(BranchScopedQuerysetMixin, generics.RetrieveUpdateDestroyAPIView):
     serializer_class   = MaintenanceScheduleSerializer
     permission_classes = [IsManager]
     queryset           = MaintenanceSchedule.objects.all()
+    branch_lookup      = 'asset__branch'
 
 
 class UpcomingMaintenanceView(APIView):
@@ -119,13 +123,14 @@ class MaintenanceLogListView(generics.ListCreateAPIView):
     def get_queryset(self):
         return MaintenanceLog.objects.filter(
             asset__branch=self.request.user.branch
-        ).order_by('-performed_at')
+        ).select_related('asset', 'performed_by').order_by('-performed_at')
 
     def perform_create(self, serializer):
         serializer.save(performed_by=self.request.user)
 
 
-class MaintenanceLogDetailView(generics.RetrieveUpdateAPIView):
+class MaintenanceLogDetailView(BranchScopedQuerysetMixin, generics.RetrieveUpdateAPIView):
     serializer_class   = MaintenanceLogSerializer
     permission_classes = [IsManager]
     queryset           = MaintenanceLog.objects.all()
+    branch_lookup      = 'asset__branch'

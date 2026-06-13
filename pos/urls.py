@@ -18,6 +18,16 @@ urlpatterns = [
     path('kot/', views.KOTListView.as_view(), name='kot-list'),
     path('bot/', views.BOTListView.as_view(), name='bot-list'),
 
-    
+    # Reservations
+    path('reservations/', views.ReservationListView.as_view(), name='reservation-list'),
+    path('reservations/available/', views.AvailableTablesForReservationView.as_view(), name='reservation-available-tables'),
+    path('reservations/<int:pk>/', views.ReservationDetailView.as_view(), name='reservation-detail'),
+    path('reservations/<int:pk>/cancel/', views.CancelReservationView.as_view(), name='reservation-cancel'),
+    path('reservations/<int:pk>/check-in/', views.CheckInReservationView.as_view(), name='reservation-check-in'),
+
+    # Billing & Payments
+    path('orders/<int:order_id>/bill/', views.GenerateBillView.as_view(), name='generate-bill'),
+    path('bills/<int:pk>/', views.BillDetailView.as_view(), name='bill-detail'),
+    path('bills/<int:bill_id>/pay/', views.ProcessPaymentView.as_view(), name='process-payment'),
 ]
 

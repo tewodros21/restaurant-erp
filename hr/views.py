@@ -15,6 +15,16 @@ from .serializers import (
 from .services import clock_in, clock_out, generate_payroll
 from accounts.models import User
 from accounts.permissions import IsManager
+from accounts.mixins import BranchScopedQuerysetMixin
+
+
+def _branch_scoped(qs, user, lookup='branch'):
+    """Limit a queryset to the user's branch (ADMIN sees all)."""
+    if getattr(user, 'role', None) == 'ADMIN':
+        return qs
+    if getattr(user, 'branch', None) is None:
+        return qs.none()
+    return qs.filter(**{lookup: user.branch})
 
 
 class DepartmentListView(generics.ListCreateAPIView):
@@ -30,13 +40,16 @@ class EmployeeProfileListView(generics.ListCreateAPIView):
     permission_classes = [IsManager]
 
     def get_queryset(self):
-        return EmployeeProfile.objects.filter(user__branch=self.request.user.branch)
+        return EmployeeProfile.objects.filter(
+            user__branch=self.request.user.branch
+        ).select_related('user', 'department')
 
 
-class EmployeeProfileDetailView(generics.RetrieveUpdateAPIView):
+class EmployeeProfileDetailView(BranchScopedQuerysetMixin, generics.RetrieveUpdateAPIView):
     serializer_class   = EmployeeProfileSerializer
     permission_classes = [IsManager]
     queryset           = EmployeeProfile.objects.all()
+    branch_lookup      = 'user__branch'
 
 
 class ClockInView(APIView):
@@ -77,7 +90,7 @@ class AttendanceListView(generics.ListAPIView):
     def get_queryset(self):
         qs = AttendanceRecord.objects.filter(
             employee__branch=self.request.user.branch
-        )
+        ).select_related('employee')
         # Filter by employee
         employee_id = self.request.query_params.get('employee_id')
         if employee_id:
@@ -116,7 +129,10 @@ class LeaveRequestApproveView(APIView):
     permission_classes = [IsManager]
 
     def patch(self, request, pk):
-        leave      = get_object_or_404(LeaveRequest, pk=pk)
+        leave      = get_object_or_404(
+            _branch_scoped(LeaveRequest.objects.all(), request.user, 'employee__branch'),
+            pk=pk
+        )
         new_status = request.data.get('status')  # APPROVED or REJECTED
 
         if new_status not in ['APPROVED', 'REJECTED']:
@@ -136,7 +152,9 @@ class GeneratePayrollView(APIView):
     permission_classes = [IsManager]
 
     def post(self, request, employee_id):
-        employee = get_object_or_404(User, id=employee_id)
+        employee = get_object_or_404(
+            _branch_scoped(User.objects.all(), request.user), id=employee_id
+        )
         month    = request.data.get('month', timezone.now().month)
         year     = request.data.get('year', timezone.now().year)
 
@@ -157,7 +175,7 @@ class PayrollListView(generics.ListAPIView):
     def get_queryset(self):
         return PayrollRecord.objects.filter(
             employee__branch=self.request.user.branch
-        )
+        ).select_related('employee')
 
 
 class ConfirmPayrollView(APIView):
@@ -165,7 +183,10 @@ class ConfirmPayrollView(APIView):
     permission_classes = [IsManager]
 
     def patch(self, request, pk):
-        payroll = get_object_or_404(PayrollRecord, pk=pk)
+        payroll = get_object_or_404(
+            _branch_scoped(PayrollRecord.objects.all(), request.user, 'employee__branch'),
+            pk=pk
+        )
         payroll.status  = 'PAID'
         payroll.paid_at = timezone.now()
         payroll.save()

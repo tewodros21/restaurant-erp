@@ -6,6 +6,7 @@ from django.contrib.auth import authenticate, login, logout
 from .models import User, Branch
 from .serializers import UserSerializer, BranchSerializer, RegisterSerializer
 from .permissions import IsAdmin, IsManager
+from .mixins import BranchScopedQuerysetMixin
 
 
 class RegisterView(generics.CreateAPIView):
@@ -24,7 +25,7 @@ class UserListView(generics.ListAPIView):
         return User.objects.filter(branch=user.branch)
 
 
-class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
+class UserDetailView(BranchScopedQuerysetMixin, generics.RetrieveUpdateDestroyAPIView):
     serializer_class = UserSerializer
     permission_classes = [IsManager]
     queryset = User.objects.all()

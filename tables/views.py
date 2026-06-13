@@ -7,6 +7,7 @@ from rest_framework.views import APIView
 from .models import Table, TableSeat, SeatingArrangement
 from .serializers import TableSerializer, TableSeatSerializer, SeatingArrangementSerializer
 from accounts.permissions import IsManager, IsWaiter
+from accounts.mixins import BranchScopedQuerysetMixin
 import qrcode
 from io import BytesIO
 from django.core.files import File
@@ -25,7 +26,7 @@ class TableListView(generics.ListCreateAPIView):
         return queryset
 
 
-class TableDetailView(generics.RetrieveUpdateDestroyAPIView):
+class TableDetailView(BranchScopedQuerysetMixin, generics.RetrieveUpdateDestroyAPIView):
     serializer_class = TableSerializer
     permission_classes = [IsManager]
     queryset = Table.objects.all()
@@ -72,7 +73,7 @@ class GenerateTableQRView(APIView):
 
     def post(self, request, pk):
         try:
-            table = Table.objects.get(pk=pk)
+            table = Table.objects.get(pk=pk, branch=request.user.branch)
             # Generate QR code pointing to the table's order URL
             qr_data = f"https://yourapp.com/order/table/{table.id}/"
             qr = qrcode.make(qr_data)

@@ -11,6 +11,9 @@ class Category(models.Model):
     def __str__(self):
         return self.name
 
+    class Meta:
+        ordering = ['name']
+
 
 class Unit(models.Model):
     """Units of measurement e.g. kg, g, ml, L, pieces"""
@@ -19,6 +22,9 @@ class Unit(models.Model):
 
     def __str__(self):
         return self.abbreviation
+
+    class Meta:
+        ordering = ['name']
 
 
 class Ingredient(models.Model):
@@ -37,6 +43,9 @@ class Ingredient(models.Model):
 
     class Meta:
         ordering = ['name']
+        indexes = [
+            models.Index(fields=['branch', 'is_active']),
+        ]
 
     def __str__(self):
         return f"{self.name} ({self.current_stock} {self.unit})"
@@ -49,7 +58,9 @@ class Ingredient(models.Model):
     def is_expired(self):
         from django.utils import timezone
         if self.expiration_date:
-            return self.expiration_date < timezone.now().date()
+            # localdate() respects the active timezone; now().date() returns the
+            # UTC date and is off-by-one near midnight in +HH offsets.
+            return self.expiration_date < timezone.localdate()
         return False
 
 
@@ -62,6 +73,9 @@ class Recipe(models.Model):
     def __str__(self):
         return f"Recipe: {self.menu_item.name}"
 
+    class Meta:
+        ordering = ['id']
+
 
 class RecipeIngredient(models.Model):
     """Each ingredient in a recipe with quantity"""
@@ -71,6 +85,9 @@ class RecipeIngredient(models.Model):
 
     def __str__(self):
         return f"{self.quantity} {self.ingredient.unit} of {self.ingredient.name}"
+
+    class Meta:
+        ordering = ['id']
 
 
 class StockTransaction(models.Model):
@@ -91,6 +108,12 @@ class StockTransaction(models.Model):
     def __str__(self):
         return f"{self.transaction_type} - {self.ingredient.name} - {self.quantity}"
 
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['ingredient', '-created_at']),
+        ]
+
 
 class WastageLog(models.Model):
     """Tracks spoiled or wasted inventory"""
@@ -103,3 +126,6 @@ class WastageLog(models.Model):
 
     def __str__(self):
         return f"Wastage: {self.ingredient.name} - {self.quantity}"
+
+    class Meta:
+        ordering = ['-created_at']

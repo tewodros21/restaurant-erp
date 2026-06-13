@@ -2,6 +2,8 @@ from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.shortcuts import get_object_or_404
+from django.db import transaction
+from decimal import Decimal, InvalidOperation
 from .models import Order, Meal, MealItem, KOT, BOT
 from .serializers import (
     OrderSerializer, CreateOrderSerializer,
@@ -9,6 +11,7 @@ from .serializers import (
     KOTSerializer, BOTSerializer
 )
 from accounts.permissions import IsWaiter, IsChef, IsManager
+from accounts.mixins import BranchScopedQuerysetMixin
 from tables.models import Table
 from .models import Reservation, Bill, BillItem, Payment, Notification
 from .serializers import ReservationSerializer, BillSerializer, PaymentSerializer
@@ -24,7 +27,12 @@ class OrderListView(generics.ListAPIView):
     def get_queryset(self):
         branch = self.request.user.branch
         status_filter = self.request.query_params.get('status')
-        qs = Order.objects.filter(branch=branch).order_by('-created_at')
+        qs = (
+            Order.objects.filter(branch=branch)
+            .select_related('table', 'waiter', 'chef')
+            .prefetch_related('meals__items__menu_item')
+            .order_by('-created_at')
+        )
         if status_filter:
             qs = qs.filter(status=status_filter)
         return qs
@@ -51,7 +59,7 @@ class CreateOrderView(generics.CreateAPIView):
         )
 
 
-class OrderDetailView(generics.RetrieveUpdateAPIView):
+class OrderDetailView(BranchScopedQuerysetMixin, generics.RetrieveUpdateAPIView):
     """Get or update a specific order"""
     serializer_class   = OrderSerializer
     permission_classes = [IsWaiter]
@@ -75,7 +83,7 @@ class AddMealItemView(APIView):
     permission_classes = [IsWaiter]
 
     def post(self, request, meal_id):
-        meal        = get_object_or_404(Meal, id=meal_id)
+        meal        = get_object_or_404(Meal, id=meal_id, order__branch=request.user.branch)
         menu_item_id = request.data.get('menu_item_id')
         quantity    = request.data.get('quantity', 1)
         notes       = request.data.get('notes', '')
@@ -114,30 +122,32 @@ class SubmitOrderView(APIView):
         food_items  = []
         drink_items = []
 
-        for meal in order.meals.all():
+        for meal in order.meals.prefetch_related('items'):
             for item in meal.items.all():
                 if item.item_type == 'FOOD':
                     food_items.append(item)
                 else:
                     drink_items.append(item)
 
-        # Generate KOT for food items
-        if food_items:
-            kot = KOT.objects.create(order=order)
-            kot.items.set(food_items)
+        # KOT/BOT creation, status change and stock deduction must all
+        # succeed or roll back together.
+        with transaction.atomic():
+            # Generate KOT for food items
+            if food_items:
+                kot = KOT.objects.create(order=order)
+                kot.items.set(food_items)
 
-        # Generate BOT for drink items
-        if drink_items:
-            bot = BOT.objects.create(order=order)
-            bot.items.set(drink_items)
+            # Generate BOT for drink items
+            if drink_items:
+                bot = BOT.objects.create(order=order)
+                bot.items.set(drink_items)
 
-        # Update order status
-        order.status = 'CONFIRMED'
-        order.save()
+            # Update order status
+            order.status = 'CONFIRMED'
+            order.save()
 
-       
-        # This triggers auto stock deduction based on recipes
-        deduct_stock_for_order(order)  
+            # This triggers auto stock deduction based on recipes
+            deduct_stock_for_order(order)
 
         return Response({
             'message': 'Order submitted successfully',
@@ -152,7 +162,9 @@ class UpdateMealItemStatusView(APIView):
     permission_classes = [IsChef]
 
     def patch(self, request, item_id):
-        item       = get_object_or_404(MealItem, id=item_id)
+        item       = get_object_or_404(
+            MealItem, id=item_id, meal__order__branch=request.user.branch
+        )
         new_status = request.data.get('status')
 
         if new_status not in MealItem.Status.values:
@@ -183,7 +195,7 @@ class KOTListView(generics.ListAPIView):
         return KOT.objects.filter(
             order__branch=self.request.user.branch,
             order__status__in=['CONFIRMED', 'PREPARING']
-        ).order_by('created_at')
+        ).select_related('order').prefetch_related('items__menu_item').order_by('created_at')
 
 
 class BOTListView(generics.ListAPIView):
@@ -195,7 +207,7 @@ class BOTListView(generics.ListAPIView):
         return BOT.objects.filter(
             order__branch=self.request.user.branch,
             order__status__in=['CONFIRMED', 'PREPARING']
-        ).order_by('created_at')
+        ).select_related('order').prefetch_related('items__menu_item').order_by('created_at')
 
 
 class UpdateOrderStatusView(APIView):
@@ -268,7 +280,7 @@ class ReservationListView(generics.ListCreateAPIView):
         )
 
 
-class ReservationDetailView(generics.RetrieveUpdateAPIView):
+class ReservationDetailView(BranchScopedQuerysetMixin, generics.RetrieveUpdateAPIView):
     serializer_class   = ReservationSerializer
     permission_classes = [IsWaiter]
     queryset           = Reservation.objects.all()
@@ -393,28 +405,31 @@ class GenerateBillView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Create bill
-        bill = Bill.objects.create(order=order, branch=request.user.branch)
+        # Bill + all its line items + totals must be created atomically.
+        with transaction.atomic():
+            bill = Bill.objects.create(order=order, branch=request.user.branch)
 
-        # Create bill items from all meal items
-        for meal in order.meals.all():
-            for item in meal.items.all():
-                BillItem.objects.create(
-                    bill       = bill,
-                    meal_item  = item,
-                    name       = item.menu_item.name,
-                    quantity   = item.quantity,
-                    unit_price = item.unit_price,
-                    subtotal   = item.subtotal
-                )
+            # Create bill items from all (non-cancelled) meal items
+            for meal in order.meals.prefetch_related('items__menu_item'):
+                for item in meal.items.all():
+                    if item.status == MealItem.Status.CANCELLED:
+                        continue
+                    BillItem.objects.create(
+                        bill       = bill,
+                        meal_item  = item,
+                        name       = item.menu_item.name,
+                        quantity   = item.quantity,
+                        unit_price = item.unit_price,
+                        subtotal   = item.subtotal
+                    )
 
-        # Calculate totals
-        bill.calculate()
+            # Calculate totals
+            bill.calculate()
 
         return Response(BillSerializer(bill).data, status=status.HTTP_201_CREATED)
 
 
-class BillDetailView(generics.RetrieveAPIView):
+class BillDetailView(BranchScopedQuerysetMixin, generics.RetrieveAPIView):
     """Get bill details"""
     serializer_class   = BillSerializer
     permission_classes = [IsCashier]
@@ -426,10 +441,18 @@ class ProcessPaymentView(APIView):
     permission_classes = [IsCashier]
 
     def post(self, request, bill_id):
-        bill        = get_object_or_404(Bill, id=bill_id)
-        method      = request.data.get('method')
-        amount_paid = float(request.data.get('amount_paid', 0))
-        reference   = request.data.get('reference_code', '')
+        bill      = get_object_or_404(Bill, id=bill_id, branch=request.user.branch)
+        method    = request.data.get('method')
+        reference = request.data.get('reference_code', '')
+
+        # Money must be Decimal, never float.
+        try:
+            amount_paid = Decimal(str(request.data.get('amount_paid', '0')))
+        except (InvalidOperation, TypeError, ValueError):
+            return Response(
+                {'error': 'amount_paid must be a valid number'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         if bill.status == 'PAID':
             return Response(
@@ -437,7 +460,7 @@ class ProcessPaymentView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        if amount_paid < float(bill.total):
+        if amount_paid < bill.total:
             return Response(
                 {'error': f'Insufficient amount. Total is {bill.total}'},
                 status=status.HTTP_400_BAD_REQUEST
@@ -449,29 +472,31 @@ class ProcessPaymentView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Create payment record
-        change = amount_paid - float(bill.total)
-        payment = Payment.objects.create(
-            bill           = bill,
-            method         = method,
-            amount_paid    = amount_paid,
-            change_given   = change,
-            reference_code = reference,
-            processed_by   = request.user
-        )
+        change = (amount_paid - bill.total).quantize(Decimal('0.01'))
 
-        # Mark bill as paid
-        bill.status = 'PAID'
-        bill.save()
+        # Payment + bill + order + table updates must all commit together.
+        with transaction.atomic():
+            payment = Payment.objects.create(
+                bill           = bill,
+                method         = method,
+                amount_paid    = amount_paid,
+                change_given   = change,
+                reference_code = reference,
+                processed_by   = request.user
+            )
 
-        # Mark order as completed & free table
-        order = bill.order
-        order.status = 'COMPLETED'
-        order.save()
+            # Mark bill as paid
+            bill.status = 'PAID'
+            bill.save()
 
-        if order.table:
-            order.table.status = Table.Status.CLEANING
-            order.table.save()
+            # Mark order as completed & free table
+            order = bill.order
+            order.status = 'COMPLETED'
+            order.save()
+
+            if order.table:
+                order.table.status = Table.Status.CLEANING
+                order.table.save()
 
         return Response({
             'message':  'Payment processed successfully',

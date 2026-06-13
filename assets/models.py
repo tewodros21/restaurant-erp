@@ -12,6 +12,9 @@ class AssetCategory(models.Model):
     def __str__(self):
         return self.name
 
+    class Meta:
+        ordering = ['name']
+
 
 class Asset(models.Model):
     class Status(models.TextChoices):
@@ -54,6 +57,9 @@ class Asset(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.status})"
+
+    class Meta:
+        ordering = ['-created_at']
 
     @property
     def annual_depreciation(self):
@@ -121,6 +127,12 @@ class MaintenanceSchedule(models.Model):
     def __str__(self):
         return f"{self.asset.name} - {self.title} (Due: {self.next_due_date})"
 
+    class Meta:
+        ordering = ['next_due_date']
+        indexes = [
+            models.Index(fields=['is_active', 'next_due_date']),
+        ]
+
 
 class MaintenanceLog(models.Model):
     class Status(models.TextChoices):
@@ -141,3 +153,6 @@ class MaintenanceLog(models.Model):
 
     def __str__(self):
         return f"{self.asset.name} - {self.title} ({self.status})"
+
+    class Meta:
+        ordering = ['-performed_at']

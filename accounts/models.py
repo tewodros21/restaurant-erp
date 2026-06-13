@@ -12,6 +12,9 @@ class Branch(models.Model):
     def __str__(self):
         return self.name
 
+    class Meta:
+        ordering = ['name']
+
 
 class User(AbstractUser):
     class Role(models.TextChoices):

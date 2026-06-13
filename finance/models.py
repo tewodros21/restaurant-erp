@@ -9,6 +9,9 @@ class ExpenseCategory(models.Model):
     def __str__(self):
         return self.name
 
+    class Meta:
+        ordering = ['name']
+
 
 class Expense(models.Model):
     class Status(models.TextChoices):
@@ -36,6 +39,12 @@ class Expense(models.Model):
 
     def __str__(self):
         return f"{self.title} - {self.amount} ({self.date})"
+
+    class Meta:
+        ordering = ['-date']
+        indexes = [
+            models.Index(fields=['branch', 'date', 'status']),
+        ]
 
 
 class DailyReport(models.Model):

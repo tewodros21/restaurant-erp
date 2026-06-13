@@ -1,6 +1,6 @@
 from celery import shared_task
 from django.utils import timezone
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 
 @shared_task
@@ -29,22 +29,29 @@ def send_reservation_reminders():
     Runs every 15 minutes — sends reminders for
     reservations happening in the next hour
     """
-    from reservations.models import Reservation
+    from pos.models import Reservation
     from .services import send_reservation_reminder
 
-    now        = timezone.now()
-    one_hour   = now + timedelta(hours=1)
+    now      = timezone.localtime()
+    one_hour = now + timedelta(hours=1)
 
-    upcoming = Reservation.objects.filter(
-        reservation_time__gte = now,
-        reservation_time__lte = one_hour,
-        status                = 'CONFIRMED'
+    # Reservation stores date + time separately, and the next hour may cross
+    # midnight — narrow on the candidate dates in the DB, then combine
+    # date+time into an aware datetime and check the precise window in Python.
+    candidates = Reservation.objects.filter(
+        reservation_date__in = [now.date(), one_hour.date()],
+        status               = 'CONFIRMED',
     )
 
-    for reservation in upcoming:
-        send_reservation_reminder(reservation)
+    sent = 0
+    for reservation in candidates:
+        when = datetime.combine(reservation.reservation_date, reservation.reservation_time)
+        when = timezone.make_aware(when, now.tzinfo)
+        if now <= when <= one_hour:
+            send_reservation_reminder(reservation)
+            sent += 1
 
-    return f"Sent {upcoming.count()} reservation reminders"
+    return f"Sent {sent} reservation reminders"
 
 
 @shared_task

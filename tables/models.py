@@ -15,6 +15,9 @@ class SeatingArrangement(models.Model):
     def __str__(self):
         return f"{self.branch.name} - {self.name}"
 
+    class Meta:
+        ordering = ['id']
+
 
 class Table(models.Model):
     class Status(models.TextChoices):
@@ -53,6 +56,9 @@ class Table(models.Model):
     class Meta:
         unique_together = ['branch', 'table_number']
         ordering = ['table_number']
+        indexes = [
+            models.Index(fields=['branch', 'status']),
+        ]
 
     def __str__(self):
         return f"Table {self.table_number} - {self.branch.name} ({self.status})"
@@ -72,6 +78,7 @@ class TableSeat(models.Model):
 
     class Meta:
         unique_together = ['table', 'seat_number']
+        ordering = ['id']
 
     def __str__(self):
         return f"Table {self.table.table_number} - Seat {self.seat_number}"

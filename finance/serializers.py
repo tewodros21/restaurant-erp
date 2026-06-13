@@ -18,8 +18,9 @@ class ExpenseSerializer(serializers.ModelSerializer):
     class Meta:
         model  = Expense
         fields = '__all__'
-        # Make auto-set fields optional
-        read_only_fields = ['branch', 'created_by', 'approved_by']
+        # Make auto-set fields optional. `status` is read-only so a creator
+        # cannot POST status='APPROVED' and bypass ApproveExpenseView.
+        read_only_fields = ['branch', 'created_by', 'approved_by', 'status']
 
 
 class DailyReportSerializer(serializers.ModelSerializer):

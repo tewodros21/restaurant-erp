@@ -1,9 +1,11 @@
 from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from django.shortcuts import get_object_or_404
 from .models import Menu, MenuSection, MenuItem
 from .serializers import MenuSerializer, MenuSectionSerializer, MenuItemSerializer
 from accounts.permissions import IsManager, IsWaiter
+from accounts.mixins import BranchScopedQuerysetMixin
 
 
 class MenuDetailView(generics.RetrieveAPIView):
@@ -13,7 +15,11 @@ class MenuDetailView(generics.RetrieveAPIView):
 
     def get_object(self):
         branch = self.request.user.branch
-        return Menu.objects.get(branch=branch)
+        menu, created = Menu.objects.get_or_create(
+            branch=branch,
+            defaults={'name': f"{branch.name} Menu"}
+        )
+        return menu
 
 
 class MenuSectionListView(generics.ListCreateAPIView):
@@ -26,10 +32,11 @@ class MenuSectionListView(generics.ListCreateAPIView):
         )
 
 
-class MenuSectionDetailView(generics.RetrieveUpdateDestroyAPIView):
+class MenuSectionDetailView(BranchScopedQuerysetMixin, generics.RetrieveUpdateDestroyAPIView):
     serializer_class = MenuSectionSerializer
     permission_classes = [IsManager]
     queryset = MenuSection.objects.all()
+    branch_lookup = 'menu__branch'
 
 
 class MenuItemListView(generics.ListCreateAPIView):
@@ -42,10 +49,11 @@ class MenuItemListView(generics.ListCreateAPIView):
         )
 
 
-class MenuItemDetailView(generics.RetrieveUpdateDestroyAPIView):
+class MenuItemDetailView(BranchScopedQuerysetMixin, generics.RetrieveUpdateDestroyAPIView):
     serializer_class = MenuItemSerializer
     permission_classes = [IsManager]
     queryset = MenuItem.objects.all()
+    branch_lookup = 'section__menu__branch'
 
 
 class PublicMenuView(generics.RetrieveAPIView):
@@ -55,4 +63,4 @@ class PublicMenuView(generics.RetrieveAPIView):
 
     def get_object(self):
         branch_id = self.kwargs['branch_id']
-        return Menu.objects.get(branch_id=branch_id)
+        return get_object_or_404(Menu, branch_id=branch_id, is_active=True)

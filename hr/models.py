@@ -10,6 +10,9 @@ class Department(models.Model):
     def __str__(self):
         return f"{self.branch.name} - {self.name}"
 
+    class Meta:
+        ordering = ['name']
+
 
 class EmployeeProfile(models.Model):
     class ContractType(models.TextChoices):

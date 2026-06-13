@@ -15,6 +15,9 @@ class Menu(models.Model):
     def __str__(self):
         return f"{self.branch.name} - Menu"
 
+    class Meta:
+        ordering = ['id']
+
 
 class MenuSection(models.Model):
     menu = models.ForeignKey(

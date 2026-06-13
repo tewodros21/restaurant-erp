@@ -29,14 +29,29 @@ class Order(models.Model):
     created_at   = models.DateTimeField(auto_now_add=True)
     updated_at   = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        indexes = [
+            models.Index(fields=['branch', 'status']),
+            models.Index(fields=['branch', '-created_at']),
+        ]
+
     def __str__(self):
         return f"Order #{self.id} - Table {self.table} ({self.status})"
 
-    
+    @property
+    def total_price(self):
+        """Sum of every (non-cancelled) meal item's subtotal across all meals."""
+        total = Decimal('0.00')
+        for meal in self.meals.all():
+            for item in meal.items.all():
+                if item.status != MealItem.Status.CANCELLED:
+                    total += item.subtotal
+        return total
 
+    # Alias kept for backwards compatibility with serializers/callers.
     @property
     def subtotal(self):
-        return Decimal(str(self.unit_price)) * self.quantity
+        return self.total_price
 
 
 class Meal(models.Model):
@@ -130,6 +145,9 @@ class Reservation(models.Model):
 
     class Meta:
         ordering = ['reservation_date', 'reservation_time']
+        indexes = [
+            models.Index(fields=['branch', 'reservation_date', 'status']),
+        ]
 
     def __str__(self):
         return f"{self.customer_name} - {self.reservation_date} {self.reservation_time}"
@@ -153,9 +171,14 @@ class Bill(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def calculate(self):
-        self.subtotal   = self.order.total_price
-        self.tax_amount = self.subtotal * (self.tax_rate / 100)
-        self.total      = self.subtotal + self.tax_amount - self.discount
+        cents = Decimal('0.01')
+        # Field defaults (e.g. tax_rate=15.00) are plain floats until a DB
+        # round-trip, so coerce everything to Decimal before arithmetic.
+        tax_rate = Decimal(str(self.tax_rate))
+        discount = Decimal(str(self.discount))
+        self.subtotal   = self.order.total_price.quantize(cents)
+        self.tax_amount = (self.subtotal * (tax_rate / Decimal('100'))).quantize(cents)
+        self.total      = (self.subtotal + self.tax_amount - discount).quantize(cents)
         self.save()
 
     def __str__(self):

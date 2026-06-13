@@ -70,7 +70,7 @@ def send_reservation_reminder(reservation):
         message   = (
             f'Reservation for {reservation.customer_name} is in 1 hour. '
             f'Table: {reservation.table}, '
-            f'Party size: {reservation.party_size}, '
+            f'Party size: {reservation.guest_count}, '
             f'Time: {reservation.reservation_time}.'
         ),
         priority  = 'MEDIUM',
